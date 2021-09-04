@@ -10,7 +10,7 @@ import time
 import numpy as np
 # import tensorflow as tf
 
-import config_train
+import config
 import tfutil
 import dataset
 import misc
@@ -117,9 +117,9 @@ class TrainingSchedule:
 
         # Minibatch size.
         self.minibatch = minibatch_dict.get(self.resolution, minibatch_base)
-        self.minibatch -= self.minibatch % config_train.num_gpus
+        self.minibatch -= self.minibatch % config.num_gpus
         if self.resolution in max_minibatch_per_gpu:
-            self.minibatch = min(self.minibatch, max_minibatch_per_gpu[self.resolution] * config_train.num_gpus)
+            self.minibatch = min(self.minibatch, max_minibatch_per_gpu[self.resolution] * config.num_gpus)
 
         # Other parameters.
         self.G_lrate = G_lrate_dict.get(self.resolution, G_lrate_base)
@@ -128,7 +128,7 @@ class TrainingSchedule:
 
 #----------------------------------------------------------------------------
 # Main training script.
-# To run, comment/uncomment appropriate lines in config_train.py and launch train.py.
+# To run, comment/uncomment appropriate lines in config.py and launch train.py.
 
 def train_progressive_gan(
     G_smoothing             = 0.999,        # Exponential running average of generator weights.
@@ -148,7 +148,7 @@ def train_progressive_gan(
     resume_time             = 0.0):         # Assumed wallclock time at the beginning. Affects reporting.
 
     maintenance_start_time = time.time()
-    training_set = dataset.load_dataset(data_dir=config_train.data_dir, verbose=True, **config_train.dataset)
+    training_set = dataset.load_dataset(data_dir=config.data_dir, verbose=True, **config.dataset)
 
     # Construct networks.
     with tf.device('/gpu:0'):
@@ -158,8 +158,8 @@ def train_progressive_gan(
             G, D, Gs = misc.load_pkl(network_pkl)
         else:
             print('Constructing networks...')
-            G = tfutil.Network('G', num_channels=training_set.shape[0], resolution=training_set.shape[1], label_size=training_set.label_size, **config_train.G)
-            D = tfutil.Network('D', num_channels=training_set.shape[0], resolution=training_set.shape[1], label_size=training_set.label_size, **config_train.D)
+            G = tfutil.Network('G', num_channels=training_set.shape[0], resolution=training_set.shape[1], label_size=training_set.label_size, **config.G)
+            D = tfutil.Network('D', num_channels=training_set.shape[0], resolution=training_set.shape[1], label_size=training_set.label_size, **config.D)
             Gs = G.clone('Gs')
         Gs_update_op = Gs.setup_as_moving_average_of(G, beta=G_smoothing)
     G.print_layers(); D.print_layers()
@@ -169,13 +169,13 @@ def train_progressive_gan(
         lod_in          = tf.placeholder(tf.float32, name='lod_in', shape=[])
         lrate_in        = tf.placeholder(tf.float32, name='lrate_in', shape=[])
         minibatch_in    = tf.placeholder(tf.int32, name='minibatch_in', shape=[])
-        minibatch_split = minibatch_in // config_train.num_gpus
+        minibatch_split = minibatch_in // config.num_gpus
         reals, labels   = training_set.get_minibatch_tf()
-        reals_split     = tf.split(reals, config_train.num_gpus)
-        labels_split    = tf.split(labels, config_train.num_gpus)
-    G_opt = tfutil.Optimizer(name='TrainG', learning_rate=lrate_in, **config_train.G_opt)
-    D_opt = tfutil.Optimizer(name='TrainD', learning_rate=lrate_in, **config_train.D_opt)
-    for gpu in range(config_train.num_gpus):
+        reals_split     = tf.split(reals, config.num_gpus)
+        labels_split    = tf.split(labels, config.num_gpus)
+    G_opt = tfutil.Optimizer(name='TrainG', learning_rate=lrate_in, **config.G_opt)
+    D_opt = tfutil.Optimizer(name='TrainD', learning_rate=lrate_in, **config.D_opt)
+    for gpu in range(config.num_gpus):
         with tf.name_scope('GPU%d' % gpu), tf.device('/gpu:%d' % gpu):
             G_gpu = G if gpu == 0 else G.clone(G.name + '_shadow')
             D_gpu = D if gpu == 0 else D.clone(D.name + '_shadow')
@@ -183,21 +183,21 @@ def train_progressive_gan(
             reals_gpu = process_reals(reals_split[gpu], lod_in, mirror_augment, training_set.dynamic_range, drange_net)
             labels_gpu = labels_split[gpu]
             with tf.name_scope('G_loss'), tf.control_dependencies(lod_assign_ops):
-                G_loss = tfutil.call_func_by_name(G=G_gpu, D=D_gpu, opt=G_opt, training_set=training_set, minibatch_size=minibatch_split, **config_train.G_loss)
+                G_loss = tfutil.call_func_by_name(G=G_gpu, D=D_gpu, opt=G_opt, training_set=training_set, minibatch_size=minibatch_split, **config.G_loss)
             with tf.name_scope('D_loss'), tf.control_dependencies(lod_assign_ops):
-                D_loss = tfutil.call_func_by_name(G=G_gpu, D=D_gpu, opt=D_opt, training_set=training_set, minibatch_size=minibatch_split, reals=reals_gpu, labels=labels_gpu, **config_train.D_loss)
+                D_loss = tfutil.call_func_by_name(G=G_gpu, D=D_gpu, opt=D_opt, training_set=training_set, minibatch_size=minibatch_split, reals=reals_gpu, labels=labels_gpu, **config.D_loss)
             G_opt.register_gradients(tf.reduce_mean(G_loss), G_gpu.trainables)
             D_opt.register_gradients(tf.reduce_mean(D_loss), D_gpu.trainables)
     G_train_op = G_opt.apply_updates()
     D_train_op = D_opt.apply_updates()
 
     print('Setting up snapshot image grid...')
-    grid_size, grid_reals, grid_labels, grid_latents = setup_snapshot_image_grid(G, training_set, **config_train.grid)
-    sched = TrainingSchedule(total_kimg * 1000, training_set, **config_train.sched)
-    grid_fakes = Gs.run(grid_latents, grid_labels, minibatch_size=sched.minibatch//config_train.num_gpus)
+    grid_size, grid_reals, grid_labels, grid_latents = setup_snapshot_image_grid(G, training_set, **config.grid)
+    sched = TrainingSchedule(total_kimg * 1000, training_set, **config.sched)
+    grid_fakes = Gs.run(grid_latents, grid_labels, minibatch_size=sched.minibatch//config.num_gpus)
 
     print('Setting up result dir...')
-    result_subdir = misc.create_result_subdir(config_train.result_dir, config_train.desc)
+    result_subdir = misc.create_result_subdir(config.result_dir, config.desc)
     misc.save_image_grid(grid_reals, os.path.join(result_subdir, 'reals.png'), drange=training_set.dynamic_range, grid_size=grid_size)
     misc.save_image_grid(grid_fakes, os.path.join(result_subdir, 'fakes%06d.png' % 0), drange=drange_net, grid_size=grid_size)
     summary_log = tf.summary.FileWriter(result_subdir)
@@ -216,7 +216,7 @@ def train_progressive_gan(
     while cur_nimg < total_kimg * 1000:
 
         # Choose training parameters and configure training ops.
-        sched = TrainingSchedule(cur_nimg, training_set, **config_train.sched)
+        sched = TrainingSchedule(cur_nimg, training_set, **config.sched)
         training_set.configure(sched.minibatch, sched.lod)
         if reset_opt_for_new_lod:
             if np.floor(sched.lod) != np.floor(prev_lod) or np.ceil(sched.lod) != np.ceil(prev_lod):
@@ -258,7 +258,7 @@ def train_progressive_gan(
 
             # Save snapshots.
             if cur_tick % image_snapshot_ticks == 0 or done:
-                grid_fakes = Gs.run(grid_latents, grid_labels, minibatch_size=sched.minibatch//config_train.num_gpus)
+                grid_fakes = Gs.run(grid_latents, grid_labels, minibatch_size=sched.minibatch//config.num_gpus)
                 misc.save_image_grid(grid_fakes, os.path.join(result_subdir, 'fakes%06d.png' % (cur_nimg // 1000)), drange=drange_net, grid_size=grid_size)
             if cur_tick % network_snapshot_ticks == 0 or done:
                 misc.save_pkl((G, D, Gs), os.path.join(result_subdir, 'network-snapshot-%06d.pkl' % (cur_nimg // 1000)))
@@ -273,16 +273,16 @@ def train_progressive_gan(
 
 #----------------------------------------------------------------------------
 # Main entry point.
-# Calls the function indicated in config_train.py.
+# Calls the function indicated in config.py.
 
 if __name__ == "__main__":
     misc.init_output_logging()
-    np.random.seed(config_train.random_seed)
+    np.random.seed(config.random_seed)
     print('Initializing TensorFlow...')
-    os.environ.update(config_train.env)
-    tfutil.init_tf(config_train.tf_config)
-    print('Running %s()...' % config_train.train['func'])
-    tfutil.call_func_by_name(**config_train.train)
+    os.environ.update(config.env)
+    tfutil.init_tf(config.tf_config)
+    print('Running %s()...' % config.train['func'])
+    tfutil.call_func_by_name(**config.train)
     print('Exiting...')
 
 #----------------------------------------------------------------------------
