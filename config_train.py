@@ -36,7 +36,7 @@ env.TF_CPP_MIN_LOG_LEVEL                        = '1'       # 0 (default) = Prin
 # Official training configs, targeted mainly for CelebA-HQ.
 # To run, comment/uncomment the lines as appropriate and launch train.py.
 
-desc        = 'pgan'                                        # Description string included in result subdir name.
+desc        = 'pgan_'                                        # Description string included in result subdir name.
 random_seed = 1000                                          # Global random seed.
 dataset     = EasyDict()                                    # Options for dataset.load_dataset().
 train       = EasyDict(func='train.train_progressive_gan')  # Options for main training func.
@@ -61,7 +61,7 @@ train.resume_run_id = 101
 train.resume_kimg = 5156
 
 # Dataset (choose one).
-desc += 'artworks_128';            dataset = EasyDict(tfrecord_dir='artworks_128_dataset'); train.mirror_augment = False
+desc += 'artworks_128';            dataset = EasyDict(tfrecord_dir='dataset_128'); train.mirror_augment = False
 #desc += '-celebahq';            dataset = EasyDict(tfrecord_dir='celebahq'); train.mirror_augment = True
 #desc += '-celeba';              dataset = EasyDict(tfrecord_dir='celeba'); train.mirror_augment = True
 #desc += '-cifar10';             dataset = EasyDict(tfrecord_dir='cifar10')
